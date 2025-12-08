@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.19.7",
     "ty>=0.0.1a16",
+    "cppyy>=3.5.0",
 ]
 
 [build-system]
@@ -32,6 +33,7 @@ module-root = ""
 [tool.uv]
 package = true
 python-preference = "managed"
+index-url = "https://mirrors.aliyun.com/pypi/simple/"
 
 [tool.pytest.ini_options]
 log_cli = true
