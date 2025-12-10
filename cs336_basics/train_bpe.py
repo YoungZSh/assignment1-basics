@@ -120,6 +120,7 @@ def make_heap_item(pair: tuple[int, int], freq: int, vocab: dict[int, bytes]):
     # RevLexKey 同时封装频率和字典序，准确定义 heap 中的优先级
     return (RevLexKey(freq, ba, bb), pair)
 
+
 def train_bpe(
     input_path: str,
     vocab_size: int,
@@ -168,9 +169,7 @@ def train_bpe(
     pair_freq: dict[tuple[int, int], int] = {}
     pair_occurrences: dict[tuple[int, int], set[TokenNode]] = {}
 
-    def add_pair_from_node(
-        node: TokenNode, track: set[tuple[int, int]] | None = None
-    ) -> None:
+    def add_pair_from_node(node: TokenNode, track: set[tuple[int, int]] | None = None) -> None:
         if node is None or not node.alive:
             return
         nxt = node.next
@@ -183,9 +182,7 @@ def train_bpe(
         if track is not None:
             track.add(pair)
 
-    def remove_pair_from_node(
-        node: TokenNode, track: set[tuple[int, int]] | None = None
-    ) -> None:
+    def remove_pair_from_node(node: TokenNode, track: set[tuple[int, int]] | None = None) -> None:
         if node is None or not node.alive:
             return
         nxt = node.next
@@ -285,9 +282,7 @@ def train_bpe(
             if freq:
                 heapq.heappush(heap, make_heap_item(pair, freq, vocab))
 
-        progress_bar.set_postfix(
-            {"pair": f"{best_pair[0]}+{best_pair[1]}", "freq": key.freq, "vocab": next_vocab_id}
-        )
+        progress_bar.set_postfix({"pair": f"{best_pair[0]}+{best_pair[1]}", "freq": key.freq, "vocab": next_vocab_id})
 
     progress_bar.close()
 
