@@ -29,7 +29,12 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    raise NotImplementedError
+    from cs336_basics.modules import Linear
+    device, dtype = in_features.device, in_features.dtype
+    linear = Linear(d_in, d_out, device=device, dtype=dtype)
+    linear.load_state_dict({"weight": weights})
+    return linear(in_features)
+
 
 
 def run_embedding(
@@ -51,7 +56,11 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    raise NotImplementedError
+    from cs336_basics.modules import Embedding
+    device = token_ids.device
+    embedding = Embedding(vocab_size, d_model, device)
+    embedding.load_state_dict({"weight": weights})
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -83,7 +92,20 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.modules import SwiGLU, get_compatible_dff
+    device = in_features.device
+    dtype = in_features.dtype
+
+    d_ff_83 = get_compatible_dff(d_model)
+    print(f"Expected d_ff to be {d_ff_83} based on d_model {d_model}; here we got d_ff to be {d_ff}.")
+
+    swiglu = SwiGLU(d_model, d_ff, device, dtype)
+    swiglu.load_state_dict({
+        "linear1.weight": w1_weight,
+        "linear2.weight": w2_weight,
+        "linear3.weight": w3_weight
+    })
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -300,7 +322,7 @@ def run_transformer_lm(
         num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
-        rope_theta (float): The RoPE $\Theta$ parameter.
+        rope_theta (float): The RoPE $\\Theta$ parameter.
         weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
@@ -378,7 +400,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import RMSNorm
+    device, dtype = in_features.device, in_features.dtype
+    rms_norm = RMSNorm(d_model, eps, device, dtype)
+    rms_norm.load_state_dict({"g": weights})
+    return rms_norm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -392,7 +418,8 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import silu
+    return silu(in_features)
 
 
 def run_get_batch(
