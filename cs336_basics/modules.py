@@ -98,6 +98,49 @@ class SwiGLU(nn.Module):
 
         return x2
 
+class RoPE(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device: torch.device | None = None) -> None:
+        super().__init__()
+
+        if d_k % 2 != 0:
+            raise ValueError("d_k must be even for RoPE.")
+
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device).float() / d_k))
+        t = torch.arange(max_seq_len).float()
+        freqs = einsum(t, inv_freq, "i, j -> i j") # 存成(max_seq_len, d_k // 2)的矩阵
+        cos = freqs.cos()
+        sin = freqs.sin()
+
+        self.register_buffer("cos_cache", cos, persistent=False)
+        self.register_buffer("sin_cache", sin, persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        if x.size(-1) != self.d_k:
+            raise ValueError(f"Last dim of x ({x.size(-1)}) ≠ d_k ({self.d_k}).")
         
+        # 获取cached矩阵
+        cos_pos = self.cos_cache[token_positions]
+        sin_pos = self.sin_cache[token_positions]
+
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+
+        out_even = x_even * cos_pos - x_odd * sin_pos
+        out_odd = x_odd * cos_pos + x_even * sin_pos
+
+        out = torch.empty_like(x, device=x.device)
+        out[..., ::2] = out_even
+        out[..., 1::2] = out_odd
+        return out
+
+
+
+
+
+
 
 
