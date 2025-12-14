@@ -1,7 +1,8 @@
 import math
 import torch
 from torch import nn
-from einops import einsum
+from einops import einsum, rearrange
+from torch.optim.optimizer import Kwargs
 
 
 class Linear(nn.Module):
@@ -14,37 +15,35 @@ class Linear(nn.Module):
         self.weight = nn.Parameter(torch.empty((out_features, in_features), device=device, dtype=dtype))
 
         sigma = math.sqrt(2.0 / (in_features + out_features))
-        nn.init.trunc_normal_(
-            self.weight, 
-            mean=0.0, 
-            std=sigma, 
-            a=-3 * sigma, 
-            b=3 * sigma
-        )
+        nn.init.trunc_normal_(self.weight, mean=0.0, std=sigma, a=-3 * sigma, b=3 * sigma)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
 
+
 class Embedding(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int, device: torch.device | None = None, dtype: torch.dtype | None = None) -> None:
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.weight = nn.Parameter(torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype))
 
-        nn.init.trunc_normal_(
-            self.weight,
-            mean=0.0,
-            std=1,
-            a=-3,
-            b=3
-        )
+        nn.init.trunc_normal_(self.weight, mean=0.0, std=1, a=-3, b=3)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.weight[token_ids]
 
+
 class RMSNorm(nn.Module):
-    def __init__(self, d_model: int, eps: float = 1e-5, device: torch.device | None = None, dtype: torch.dtype | None = None) -> None:
+    def __init__(
+        self, d_model: int, eps: float = 1e-5, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> None:
         super().__init__()
         self.d_model = d_model
         self.eps = eps
@@ -67,8 +66,10 @@ class RMSNorm(nn.Module):
 
         return result.to(in_dtype)
 
+
 def silu(x: torch.Tensor) -> torch.Tensor:
     return x * torch.sigmoid(x)
+
 
 def get_compatible_dff(d_model: int) -> int:
     """
@@ -78,8 +79,11 @@ def get_compatible_dff(d_model: int) -> int:
     rounded = int((raw + 32) // 64) * 64  # round to nearest multiple of 64
     return rounded
 
+
 class SwiGLU(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, device: torch.device | None = None, dtype: torch.dtype | None = None) -> None:
+    def __init__(
+        self, d_model: int, d_ff: int, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> None:
         super().__init__()
         self.d_model = d_model
         self.d_ff = d_ff
@@ -98,7 +102,8 @@ class SwiGLU(nn.Module):
 
         return x2
 
-class RoPE(nn.Module):
+
+class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device: torch.device | None = None) -> None:
         super().__init__()
 
@@ -111,7 +116,7 @@ class RoPE(nn.Module):
 
         inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device).float() / d_k))
         t = torch.arange(max_seq_len).float()
-        freqs = einsum(t, inv_freq, "i, j -> i j") # 存成(max_seq_len, d_k // 2)的矩阵
+        freqs = einsum(t, inv_freq, "i, j -> i j")  # 存成(max_seq_len, d_k // 2)的矩阵
         cos = freqs.cos()
         sin = freqs.sin()
 
@@ -121,7 +126,7 @@ class RoPE(nn.Module):
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         if x.size(-1) != self.d_k:
             raise ValueError(f"Last dim of x ({x.size(-1)}) ≠ d_k ({self.d_k}).")
-        
+
         # 获取cached矩阵
         cos_pos = self.cos_cache[token_positions]  # pyright: ignore[reportIndexIssue]
         sin_pos = self.sin_cache[token_positions]  # pyright: ignore[reportIndexIssue]
@@ -137,12 +142,16 @@ class RoPE(nn.Module):
         out[..., 1::2] = out_odd
         return out
 
-def softmax_stable(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
-    x = x - x.max(dim = dim, keepdim=True).values # 转化为负数防止数值上溢，减去最大值后与原softmax等价
-    x_exp = torch.exp(x)
-    return x_exp / x_exp.sum(dim=dim, keepdim=True) 
 
-def scaled_dot_product_attention(key: torch.Tensor, query: torch.Tensor, value: torch.Tensor, mask: torch.Tensor | None = None):
+def softmax_stable(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    x = x - x.max(dim=dim, keepdim=True).values  # 转化为负数防止数值上溢，减去最大值后与原softmax等价
+    x_exp = torch.exp(x)
+    return x_exp / x_exp.sum(dim=dim, keepdim=True)
+
+
+def scaled_dot_product_attention(
+    key: torch.Tensor, query: torch.Tensor, value: torch.Tensor, mask: torch.Tensor | None = None
+):
     d_k = key.size(-1)
     device, dtype = key.device, key.dtype
     scale = 1.0 / torch.tensor(d_k, device=device, dtype=dtype).sqrt()
@@ -160,6 +169,94 @@ def scaled_dot_product_attention(key: torch.Tensor, query: torch.Tensor, value: 
     return output
 
 
+class CausalMultiheadSelfAttention(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        rope_theta: float = 10000.0,
+        use_rope: bool = True,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.d_v = self.d_k
+        self.use_rope = use_rope
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.q_proj, self.k_proj, self.v_proj, self.o_proj = [
+            Linear(d_model, d_model, **factory_kwargs) for _ in range(4)
+        ]
+
+        # causal mask， shape: (1, 1, max_seq_len, max_seq_len)
+        mask = torch.tril(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device))
+        self.register_buffer("causal_mask", mask.unsqueeze(0).unsqueeze(0), persistent=False)
+
+        if use_rope:
+            self.rope = RotaryPositionalEmbedding(rope_theta, self.d_k, max_seq_len, device)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+        batch, seq_len, _ = x.shape
+
+        # get multi-head q k v
+        q, k, v = [
+            rearrange(proj(x), "batch seq_len (head dim) -> batch head seq_len dim", head=self.num_heads)
+            for proj in [self.q_proj, self.k_proj, self.v_proj]
+        ]
+
+        if self.use_rope:
+            q, k = self.rope(q, token_positions), self.rope(k, token_positions)
+
+        # 计算attention并融合不同head
+        out = scaled_dot_product_attention(k, q, v, self.causal_mask[..., :seq_len, :seq_len])
+        out = rearrange(out, "batch head seq_len dim -> batch seq_len (head dim)")
+        return self.o_proj(out)
 
 
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        max_seq_len: int,
+        use_rope: bool = False,
+        rope_theta: float = 10000.0,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
 
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        # layer1: rms_norm + attention_block
+        self.pre_norm1 = RMSNorm(d_model=d_model, **factory_kwargs)
+        self.attn = CausalMultiheadSelfAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            use_rope=True,
+            rope_theta=rope_theta,
+            **factory_kwargs,
+        )
+
+        # layer2: rms_norm + ffn(SwiGLU)
+        self.pre_norm2 = RMSNorm(d_model=d_model, **factory_kwargs)
+        self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff, **factory_kwargs)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        attn_out = self.attn(self.pre_norm1(x), token_positions=token_positions)
+        x = attn_out + x
+
+        ffn_out = self.ffn(self.pre_norm2(x))
+        x = ffn_out + x
+
+        return x
