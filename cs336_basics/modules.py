@@ -1,7 +1,7 @@
 import math
 import torch
 from torch import nn
-from einops import einsum, rearrange
+from einops import einsum
 
 
 class Linear(nn.Module):
@@ -123,8 +123,8 @@ class RoPE(nn.Module):
             raise ValueError(f"Last dim of x ({x.size(-1)}) ≠ d_k ({self.d_k}).")
         
         # 获取cached矩阵
-        cos_pos = self.cos_cache[token_positions]
-        sin_pos = self.sin_cache[token_positions]
+        cos_pos = self.cos_cache[token_positions]  # pyright: ignore[reportIndexIssue]
+        sin_pos = self.sin_cache[token_positions]  # pyright: ignore[reportIndexIssue]
 
         x_even = x[..., ::2]
         x_odd = x[..., 1::2]
@@ -137,8 +137,27 @@ class RoPE(nn.Module):
         out[..., 1::2] = out_odd
         return out
 
+def softmax_stable(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    x = x - x.max(dim = dim, keepdim=True).values # 转化为负数防止数值上溢，减去最大值后与原softmax等价
+    x_exp = torch.exp(x)
+    return x_exp / x_exp.sum(dim=dim, keepdim=True) 
 
+def scaled_dot_product_attention(key: torch.Tensor, query: torch.Tensor, value: torch.Tensor, mask: torch.Tensor | None = None):
+    d_k = key.size(-1)
+    device, dtype = key.device, key.dtype
+    scale = 1.0 / torch.tensor(d_k, device=device, dtype=dtype).sqrt()
 
+    attn_score = einsum(query, key, "... q_len d_k, ... k_len d_k -> ... q_len k_len") * scale
+
+    if mask is not None:
+        attn_score = attn_score.masked_fill(~mask, -torch.inf)
+
+    # softmax along the keys dimension
+    attn_probs = softmax_stable(attn_score, dim=-1)
+
+    output = einsum(attn_probs, value, "... q_len k_len, ... k_len d_v -> ... q_len d_v")
+
+    return output
 
 
 
