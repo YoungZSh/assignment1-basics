@@ -443,7 +443,61 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import TransformerLM
+    
+    device = in_indices.device
+    # 从weights中获取dtype（权重通常是float类型）
+    dtype = next(iter(weights.values())).dtype
+    
+    # 创建 TransformerLM 模型
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        num_layers=num_layers,
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        use_rope=True,
+        rope_theta=rope_theta,
+        device=device,
+        dtype=dtype
+    )
+    
+    # 构建状态字典，将参考实现的权重映射到我们的模型
+    state_dict = {}
+    
+    # Token embeddings
+    state_dict["tok_emb.weight"] = weights["token_embeddings.weight"]
+    
+    # 每个 Transformer block 的权重
+    for i in range(num_layers):
+        prefix = f"blocks.{i}."
+        ref_prefix = f"layers.{i}."
+        
+        # Attention 层
+        state_dict[f"{prefix}attn.q_proj.weight"] = weights[f"{ref_prefix}attn.q_proj.weight"]
+        state_dict[f"{prefix}attn.k_proj.weight"] = weights[f"{ref_prefix}attn.k_proj.weight"]
+        state_dict[f"{prefix}attn.v_proj.weight"] = weights[f"{ref_prefix}attn.v_proj.weight"]
+        state_dict[f"{prefix}attn.o_proj.weight"] = weights[f"{ref_prefix}attn.output_proj.weight"]
+        
+        # RMSNorm 层
+        state_dict[f"{prefix}pre_norm1.g"] = weights[f"{ref_prefix}ln1.weight"]
+        state_dict[f"{prefix}pre_norm2.g"] = weights[f"{ref_prefix}ln2.weight"]
+        
+        # FFN 层
+        state_dict[f"{prefix}ffn.linear1.weight"] = weights[f"{ref_prefix}ffn.w1.weight"]
+        state_dict[f"{prefix}ffn.linear2.weight"] = weights[f"{ref_prefix}ffn.w2.weight"]
+        state_dict[f"{prefix}ffn.linear3.weight"] = weights[f"{ref_prefix}ffn.w3.weight"]
+    
+    # 最终的 RMSNorm 和输出层
+    state_dict["norm.g"] = weights["ln_final.weight"]
+    state_dict["linear.weight"] = weights["lm_head.weight"]
+    
+    # 加载权重
+    model.load_state_dict(state_dict)
+    
+    # 前向传播
+    return model(in_indices)
 
 
 def run_rmsnorm(

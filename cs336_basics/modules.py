@@ -259,3 +259,63 @@ class TransformerBlock(nn.Module):
         x = ffn_out + x
 
         return x
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        num_layers: int,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        use_rope: bool = True,
+        rope_theta: float = 1000.0,
+        device: torch.Tensor | None = None,
+        dtype: torch.Tensor | None = None
+    ) -> None:
+        super().__init__()
+        self.context_length = context_length
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        self.tok_emb = Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=d_model,
+            **factory_kwargs
+        )
+
+        self.blocks = nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                max_seq_len=context_length,
+                use_rope=True,
+                rope_theta=rope_theta,
+                **factory_kwargs
+            ) for _ in range(num_layers)
+        ])
+
+        self.norm = RMSNorm(d_model=d_model, **factory_kwargs)
+
+        self.linear = Linear(in_features=d_model, out_features=vocab_size, **factory_kwargs)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        b, s = token_ids.shape
+        if s > self.context_length:
+            raise ValueError(f"seq_len {s} exceeds context_length {self.context_length}")
+        
+        x = self.tok_emb(token_ids)
+        pos = torch.arange(s, device = token_ids.device).unsqueeze(0).expand(b, s)
+
+        for block in self.blocks:
+            x = block(x, token_positions=pos)
+        
+        x = self.norm(x)
+
+        logits = self.linear(x)
+
+        return logits
+
