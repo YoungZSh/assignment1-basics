@@ -2,7 +2,6 @@ import math
 import torch
 from torch import nn
 from einops import einsum, rearrange
-from torch.optim.optimizer import Kwargs
 
 
 class Linear(nn.Module):
@@ -115,7 +114,7 @@ class RotaryPositionalEmbedding(nn.Module):
         self.max_seq_len = max_seq_len
 
         inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device).float() / d_k))
-        t = torch.arange(max_seq_len).float()
+        t = torch.arange(max_seq_len, device=device).float()
         freqs = einsum(t, inv_freq, "i, j -> i j")  # 存成(max_seq_len, d_k // 2)的矩阵
         cos = freqs.cos()
         sin = freqs.sin()
@@ -243,7 +242,7 @@ class TransformerBlock(nn.Module):
             d_model=d_model,
             num_heads=num_heads,
             max_seq_len=max_seq_len,
-            use_rope=True,
+            use_rope=use_rope,
             rope_theta=rope_theta,
             **factory_kwargs,
         )
