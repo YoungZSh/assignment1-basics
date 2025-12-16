@@ -1,8 +1,9 @@
 import math
 import torch
 from torch import nn
+from torch.optim.optimizer import ParamsT
 from einops import einsum, rearrange
-
+from collections.abc import Callable
 
 class Linear(nn.Module):
     def __init__(
@@ -330,4 +331,61 @@ def cross_entropy_stable(logits: torch.Tensor, targets:torch.Tensor) -> torch.Te
     return (log_sum_exp - correct).mean() # 需要对所有维度求和
 
 
- 
+class AdamW(torch.optim.Optimizer):
+    def __init__(self, 
+        params: ParamsT, 
+        lr: float, 
+        betas: tuple[float, float],
+        weight_decay:float,
+        eps: float = 1e-8
+    ) -> None:
+        if lr < 0:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if betas[0] < 0 or betas[0] > 1:
+            raise ValueError(f"Invalid beta_1: {betas[0]}") 
+        if betas[1] < 0 or betas[1] > 1:
+            raise ValueError(f"Invalid beta_2: {betas[1]}")
+        if weight_decay < 0:
+            raise ValueError(f"Invalid weight decay rate: {weight_decay}")
+        if eps < 0:
+            raise ValueError(f"Invalid eps: {eps}")
+        defaults = {
+            "lr": lr,
+            "beta1": betas[0],
+            "beta2": betas[1],
+            "wdr": weight_decay,
+            "eps": eps
+        }
+        super().__init__(params, defaults)
+
+    def step(self, closure: Callable | None = None) -> torch.Tensor | None:
+        loss = None if closure is None else closure()
+
+        for group in self.param_groups:
+            lr = group["lr"]
+            beta1 = group["beta1"]
+            beta2 = group["beta2"]
+            weight_decay_rate = group["wdr"]
+            eps = group["eps"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                grad = p.grad.data
+                state = self.state[p]
+                t = state.get("t", 0) + 1
+                m = state.get("m", torch.zeros_like(p.data))
+                v = state.get("v", torch.zeros_like(p.data))
+
+                m = beta1 * m + (1 - beta1) * grad
+                v = beta2 * v + (1 - beta2) * grad ** 2
+                # Bias correction: m_hat = m / (1 - beta1^t), v_hat = v / (1 - beta2^t)
+                lr_t = lr * (1 - beta2 ** t) ** 0.5 / (1 - beta1 ** t)
+
+                p.data -= lr_t * m / (v ** 0.5 + eps) + lr * weight_decay_rate * p.data
+                state["t"] = t
+                state["m"] = m
+                state["v"] = v
+        return loss
+            
+                
