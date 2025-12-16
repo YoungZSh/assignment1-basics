@@ -319,3 +319,15 @@ class TransformerLM(nn.Module):
 
         return logits
 
+def cross_entropy_stable(logits: torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
+    # loss = mean( log( sum_j exp(o_j - max_k o_k) ) - (o_y - max_k o_k) )
+    # logits: (batch_size, seq_len, vocab_size)
+    # targets: (batch_size, seq_len)
+    logits = logits - logits.max(dim=-1, keepdim=True).values
+    logits_exp = torch.exp(logits)
+    log_sum_exp = torch.log(logits_exp.sum(dim=-1))
+    correct = logits.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+    return (log_sum_exp - correct).mean() # 需要对所有维度求和
+
+
+ 
