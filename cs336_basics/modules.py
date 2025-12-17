@@ -388,4 +388,10 @@ class AdamW(torch.optim.Optimizer):
                 state["v"] = v
         return loss
             
-                
+def learning_rate_cosine_schedule(t: int, lr_max: float, lr_min: float, warmup_iters: int, total_iters: int, **kwargs) -> float:
+    if t < warmup_iters:
+        return lr_max * t / warmup_iters
+    elif t < total_iters:
+        return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * (t - warmup_iters) / (total_iters - warmup_iters)))
+    else:
+        return lr_min
