@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.optim.optimizer import ParamsT
 from einops import einsum, rearrange
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 class Linear(nn.Module):
     def __init__(
@@ -388,10 +388,27 @@ class AdamW(torch.optim.Optimizer):
                 state["v"] = v
         return loss
             
-def learning_rate_cosine_schedule(t: int, lr_max: float, lr_min: float, warmup_iters: int, total_iters: int, **kwargs) -> float:
+def learning_rate_cosine_schedule(t: int, lr_max: float, lr_min: float, warmup_iters: int, total_iters: int) -> float:
+    # 余弦退火学习率策略
     if t < warmup_iters:
         return lr_max * t / warmup_iters
     elif t < total_iters:
         return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * (t - warmup_iters) / (total_iters - warmup_iters)))
     else:
         return lr_min
+
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float, eps: float = 1e-6) -> None:
+    # 计算所有参数梯度的总 L2 范数
+    total_norm_sq = 0.0
+    for p in parameters:
+        if p.grad is not None:
+            total_norm_sq += p.grad.data.norm() ** 2
+    
+    total_norm = total_norm_sq ** 0.5
+    
+    # 如果总范数超过 max_norm，计算缩放因子并应用到所有梯度
+    if total_norm > max_l2_norm:
+        clip_coef = max_l2_norm / (total_norm + eps)
+        for p in parameters:
+            if p.grad is not None:
+                p.grad.data *= clip_coef
