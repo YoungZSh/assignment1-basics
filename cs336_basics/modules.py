@@ -387,6 +387,11 @@ class AdamW(torch.optim.Optimizer):
                 state["m"] = m
                 state["v"] = v
         return loss
+    
+    def set_lr(self, lr: float) -> None:
+        """设置学习率"""
+        for group in self.param_groups:
+            group["lr"] = lr
             
 def learning_rate_cosine_schedule(t: int, lr_max: float, lr_min: float, warmup_iters: int, total_iters: int) -> float:
     # 余弦退火学习率策略
